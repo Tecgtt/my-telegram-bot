@@ -92,6 +92,8 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
 def start_health_server():
     """Runs HTTP server if PORT environment variable is present (Cloud hosting)."""
     port_str = os.getenv("PORT")
+    if not port_str and os.getenv("SPACE_ID"):
+        port_str = "7860"
     if not port_str:
         return
     try:

@@ -6,16 +6,26 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-WORKDIR /app
+# Setup non-root user for Hugging Face Spaces compatibility
+RUN useradd -m -u 1000 user
+USER user
+ENV HOME=/home/user \
+    PATH=/home/user/.local/bin:$PATH
+
+WORKDIR $HOME/app
 
 # Copy dependency definition
-COPY requirements.txt .
+COPY --chown=user requirements.txt .
 
 # Install python dependencies
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir --user -r requirements.txt
 
 # Copy bot source code
-COPY . .
+COPY --chown=user . .
+
+# Expose default port
+ENV PORT=7860
+EXPOSE 7860
 
 # Run bot
 CMD ["python3", "bot.py"]
