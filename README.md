@@ -1,3 +1,13 @@
+---
+title: Telegram Bot
+emoji: 🎬
+colorFrom: blue
+colorTo: indigo
+sdk: docker
+app_port: 7860
+pinned: false
+---
+
 # 🎬 All-in-One Telegram Video & Audio (MP3) Downloader Bot
 
 एक शक्तिशाली और आसान टेलीग्राम बॉट जिससे आप **YouTube**, **Instagram Reels**, और **Facebook Videos** को केवल उनका लिंक भेजकर सीधे टेलीग्राम पर **Video (MP4)** या **Audio (MP3)** में डाउनलोड कर सकते हैं।
