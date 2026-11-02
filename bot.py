@@ -13,7 +13,9 @@ import glob
 import uuid
 import logging
 import asyncio
+import threading
 from pathlib import Path
+from http.server import HTTPServer, BaseHTTPRequestHandler
 from dotenv import load_dotenv
 
 from telegram import (
@@ -52,8 +54,11 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 DOWNLOADS_DIR = Path(__file__).parent / "downloads"
 DOWNLOADS_DIR.mkdir(exist_ok=True)
 
-# FFmpeg binary location provided by imageio-ffmpeg
-FFMPEG_PATH = imageio_ffmpeg.get_ffmpeg_exe()
+# FFmpeg binary location provided by imageio-ffmpeg (or system ffmpeg if in cloud container)
+try:
+    FFMPEG_PATH = imageio_ffmpeg.get_ffmpeg_exe()
+except Exception:
+    FFMPEG_PATH = "ffmpeg"
 
 # URL detection regex pattern
 URL_REGEX = re.compile(r"https?://(?:www\.)?[-a-zA-Z0-9@:%._\+~#=]{1,256}\.[a-zA-Z0-9()]{1,6}\b(?:[-a-zA-Z0-9()@:%_\+.~#?&//=]*)")
@@ -70,6 +75,33 @@ SUPPORT_TELEGRAM_USERNAME = "yqios"
 SUPPORT_TELEGRAM_URL = "https://t.me/yqios"
 SUPPORT_WHATSAPP_NUMBER = "+917015346487"
 SUPPORT_WHATSAPP_URL = "https://wa.me/917015346487"
+
+
+class HealthCheckHandler(BaseHTTPRequestHandler):
+    """Minimal HTTP handler to satisfy Render/Railway/Koyeb 24/7 web service health checks."""
+    def do_GET(self):
+        self.send_response(200)
+        self.send_header("Content-type", "text/plain")
+        self.end_headers()
+        self.wfile.write(b"Telegram Video Downloader Bot is running 24/7!")
+
+    def log_message(self, format, *args):
+        return  # Silence logs for clean output
+
+
+def start_health_server():
+    """Runs HTTP server if PORT environment variable is present (Cloud hosting)."""
+    port_str = os.getenv("PORT")
+    if not port_str:
+        return
+    try:
+        port = int(port_str)
+        server = HTTPServer(("0.0.0.0", port), HealthCheckHandler)
+        logger.info(f"Health-check server running on port {port} for 24/7 Cloud Hosting")
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+    except Exception as e:
+        logger.warning(f"Could not start cloud health check server: {e}")
 
 
 def is_admin(user) -> bool:
@@ -292,7 +324,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"📱 **WhatsApp:** [{SUPPORT_WHATSAPP_NUMBER}]({SUPPORT_WHATSAPP_URL})"
     )
 
-    # Base buttons list (pure list of lists)
+    # Base buttons list
     keyboard = get_contact_buttons()
 
     # If the user is admin, insert the Dashboard button at the very top!
@@ -745,6 +777,9 @@ def main():
         sys.exit(1)
 
     print("🤖 Telegram Video & Audio (MP3) Downloader Bot शुरू हो रहा है...")
+
+    # Start Cloud 24/7 Health-check server (if PORT is set in Cloud environment)
+    start_health_server()
 
     app = ApplicationBuilder().token(BOT_TOKEN).build()
 
