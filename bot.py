@@ -10,10 +10,13 @@ import os
 import re
 import sys
 import glob
+import time
 import uuid
 import logging
 import asyncio
 import threading
+import urllib.request
+import urllib.parse
 from pathlib import Path
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from dotenv import load_dotenv
@@ -78,26 +81,113 @@ SUPPORT_WHATSAPP_URL = "https://wa.me/917015346487"
 
 
 class HealthCheckHandler(BaseHTTPRequestHandler):
-    """Minimal HTTP handler to satisfy Render/Railway/Koyeb 24/7 web service health checks."""
+    """HTTP handler for Render 24/7 keep-alive checks and high-speed large file streaming."""
     def do_GET(self):
-        self.send_response(200)
-        self.send_header("Content-type", "text/plain")
+        parsed = urllib.parse.urlparse(self.path)
+        path = parsed.path
+        if path in ("/", "/health", "/ping"):
+            self.send_response(200)
+            self.send_header("Content-type", "text/plain; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(b"Telegram Video Downloader Bot is running 24/7!")
+            return
+
+        if path.startswith("/download/"):
+            filename = urllib.parse.unquote(path.replace("/download/", "")).lstrip("/")
+            file_path = DOWNLOADS_DIR / filename
+            if file_path.exists() and file_path.is_file():
+                file_size = os.path.getsize(file_path)
+                self.send_response(200)
+                content_type = "video/mp4" if filename.endswith(".mp4") else "audio/mpeg" if filename.endswith(".mp3") else "application/octet-stream"
+                self.send_header("Content-Type", content_type)
+                self.send_header("Content-Disposition", f'attachment; filename="{filename}"')
+                self.send_header("Content-Length", str(file_size))
+                self.send_header("Accept-Ranges", "bytes")
+                self.end_headers()
+                try:
+                    with open(file_path, "rb") as f:
+                        while chunk := f.read(1024 * 1024):  # 1MB buffer chunks
+                            self.wfile.write(chunk)
+                except (BrokenPipeError, ConnectionResetError):
+                    pass
+                return
+            else:
+                self.send_response(404)
+                self.send_header("Content-type", "text/plain")
+                self.end_headers()
+                self.wfile.write(b"File not found or link expired.")
+                return
+
+        self.send_response(404)
         self.end_headers()
-        self.wfile.write(b"Telegram Video Downloader Bot is running 24/7!")
 
     def log_message(self, format, *args):
         return  # Silence logs for clean output
 
 
+def keep_alive_ping_loop():
+    """
+    Background worker that pings RENDER_EXTERNAL_URL every 8 minutes.
+    This prevents Render's Free tier from ever spinning down (sleeping) due to 15-min inactivity!
+    """
+    render_url = os.getenv("RENDER_EXTERNAL_URL") or os.getenv("SELF_PING_URL")
+    if not render_url and os.getenv("RENDER_EXTERNAL_HOSTNAME"):
+        render_url = f"https://{os.getenv('RENDER_EXTERNAL_HOSTNAME')}"
+
+    if not render_url:
+        logger.info("RENDER_EXTERNAL_URL not set yet. Standing by for incoming web traffic.")
+        return
+
+    logger.info(f"🚀 Render 24/7 Keep-Alive Pinger active for: {render_url}")
+    time.sleep(45)  # Wait for web server to initialize
+
+    while True:
+        try:
+            time.sleep(8 * 60)  # Ping every 8 minutes (Render sleep threshold is 15 mins)
+            req = urllib.request.Request(
+                render_url,
+                headers={"User-Agent": "Render247KeepAlive/1.0 (Bot Online Monitor)"}
+            )
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                logger.info(f"Render keep-alive ping status: {resp.status}")
+        except Exception as e:
+            logger.warning(f"Keep-alive ping notice: {e}")
+
+
+def cleanup_old_downloads():
+    """Periodically clean up downloaded files older than 45 minutes to free disk space."""
+    while True:
+        try:
+            time.sleep(15 * 60)
+            now = time.time()
+            for p in DOWNLOADS_DIR.glob("*"):
+                if p.is_file() and (now - p.stat().st_mtime) > (45 * 60):
+                    try:
+                        p.unlink()
+                        logger.info(f"Auto-cleaned expired download: {p.name}")
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+
+
 def start_health_server():
-    """Runs HTTP server for Render/Railway/Koyeb 24/7 web service health checks."""
+    """Runs HTTP server for Render/Railway/Koyeb 24/7 web service health checks & keep-alive."""
     port_str = os.getenv("PORT", "10000")
     try:
         port = int(port_str)
         server = HTTPServer(("0.0.0.0", port), HealthCheckHandler)
-        logger.info(f"Health-check server running on 0.0.0.0:{port} for Cloud 24/7 Hosting")
+        logger.info(f"Health-check & File Server running on 0.0.0.0:{port} for Cloud 24/7 Hosting")
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
+
+        # Start 24/7 Keep-Alive Pinger
+        ping_thread = threading.Thread(target=keep_alive_ping_loop, daemon=True)
+        ping_thread.start()
+
+        # Start Periodic Disk Cleanup
+        clean_thread = threading.Thread(target=cleanup_old_downloads, daemon=True)
+        clean_thread.start()
     except Exception as e:
         logger.warning(f"Could not start cloud health check server: {e}")
 
@@ -218,9 +308,11 @@ def download_media_sync(url: str, output_template: str, mode: str = "video") -> 
         "no_warnings": True,
         "ffmpeg_location": FFMPEG_PATH,
         # High speed parallel downloading optimizations
-        "concurrent_fragment_downloads": 8,
-        "buffersize": 1024 * 1024,
-        "retries": 10,
+        "concurrent_fragment_downloads": 16,
+        "buffersize": 16 * 1024 * 1024,
+        "http_chunk_size": 10485760,
+        "retries": 15,
+        "fragment_retries": 15,
         "socket_timeout": 30,
         "extractor_args": {
             "youtube": {
@@ -687,9 +779,9 @@ async def handle_download_callback(update: Update, context: ContextTypes.DEFAULT
                             title=title,
                             performer=uploader,
                             duration=int(duration) if duration else None,
-                            read_timeout=300,
-                            write_timeout=300,
-                            connect_timeout=60,
+                            read_timeout=600,
+                            write_timeout=600,
+                            connect_timeout=120,
                             parse_mode="Markdown",
                             reply_markup=InlineKeyboardMarkup(get_contact_buttons())
                         )
@@ -705,9 +797,9 @@ async def handle_download_callback(update: Update, context: ContextTypes.DEFAULT
                             video=video_fp,
                             caption=caption,
                             supports_streaming=True,
-                            read_timeout=300,
-                            write_timeout=300,
-                            connect_timeout=60,
+                            read_timeout=600,
+                            write_timeout=600,
+                            connect_timeout=120,
                             parse_mode="Markdown",
                             reply_markup=InlineKeyboardMarkup(get_contact_buttons())
                         )
@@ -716,10 +808,19 @@ async def handle_download_callback(update: Update, context: ContextTypes.DEFAULT
                 return
 
             else:
-                # File > 50MB: Provide instant high-speed direct download button
+                # File > 50MB: Provide instant high-speed direct download buttons
                 buttons = []
-                if direct_url:
-                    buttons.append([InlineKeyboardButton(f"⚡ Fast Direct Download ({size_mb:.1f} MB)", url=direct_url)])
+                render_url = os.getenv("RENDER_EXTERNAL_URL") or os.getenv("SELF_PING_URL")
+                if not render_url and os.getenv("RENDER_EXTERNAL_HOSTNAME"):
+                    render_url = f"https://{os.getenv('RENDER_EXTERNAL_HOSTNAME')}"
+
+                if render_url:
+                    server_dl = f"{render_url.rstrip('/')}/download/{urllib.parse.quote(os.path.basename(downloaded_file))}"
+                    buttons.append([InlineKeyboardButton(f"⚡ High-Speed Direct Download ({size_mb:.1f} MB)", url=server_dl)])
+
+                if direct_url and direct_url.startswith("http"):
+                    buttons.append([InlineKeyboardButton(f"🌐 Original Stream Link ({size_mb:.1f} MB)", url=direct_url)])
+
                 buttons.append([
                     InlineKeyboardButton("💬 Telegram Support", url=SUPPORT_TELEGRAM_URL),
                     InlineKeyboardButton("📱 WhatsApp Support", url=SUPPORT_WHATSAPP_URL)
@@ -727,12 +828,15 @@ async def handle_download_callback(update: Update, context: ContextTypes.DEFAULT
 
                 await query.edit_message_text(
                     f"🎬 **{title}**\n\n"
-                    f"📦 **Size:** {size_mb:.1f} MB (High Quality)\n\n"
-                    "⚡ *File exceeds Telegram's 50MB upload limit. Tap below to download in Full HD at maximum speed:*",
+                    f"📦 **Size:** `{size_mb:.1f} MB` (Full High Quality)\n"
+                    "━━━━━━━━━━━━━━━━━━━━━━\n"
+                    "⚡ *Note: File exceeds Telegram's 50MB in-app upload limit.*\n"
+                    "👉 **Tap the button below to download at maximum high speed:**",
                     parse_mode="Markdown",
                     reply_markup=InlineKeyboardMarkup(buttons),
                     disable_web_page_preview=True
                 )
+                downloaded_file = None  # Retain on server for user download; cleaned after 45 mins
                 return
 
         else:
@@ -768,7 +872,8 @@ async def handle_download_callback(update: Update, context: ContextTypes.DEFAULT
         base_pattern = str(DOWNLOADS_DIR / f"{chat_id}_{req_id}_*")
         for leftover in glob.glob(base_pattern):
             try:
-                os.remove(leftover)
+                if not leftover.endswith((".mp4", ".mp3")):
+                    os.remove(leftover)
             except Exception:
                 pass
 
