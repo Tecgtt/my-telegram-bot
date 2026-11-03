@@ -2,7 +2,7 @@ services:
   - type: web
     name: telegram-video-bot
     runtime: python
-    buildCommand: pip install -r requirements.txt
+    buildCommand: pip install -U pip && pip install -U -r requirements.txt
     startCommand: python3 bot.py
     plan: free
     autoDeploy: true

@@ -175,20 +175,33 @@ def extract_media_info(url: str) -> dict:
         "quiet": True,
         "no_warnings": True,
         "noplaylist": True,
-        "http_headers": {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-            "Accept": "*/*",
+        "extractor_args": {
+            "youtube": {
+                "player_client": ["web_embedded", "mweb", "android", "ios"],
+            }
         },
     }
+    if os.path.exists("cookies.txt"):
+        ydl_opts["cookiefile"] = "cookies.txt"
+
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(url, download=False)
         if "entries" in info:
             info = info["entries"][0]
+        
+        # Determine direct URL if available
+        direct_url = info.get("url")
+        if not direct_url and "formats" in info:
+            for f in reversed(info["formats"]):
+                if f.get("url") and f.get("ext") in ["mp4", "m4a", "webm"]:
+                    direct_url = f.get("url")
+                    break
+
         return {
             "title": info.get("title", "Unknown Title"),
             "duration": info.get("duration", 0),
             "uploader": info.get("uploader", "Unknown"),
-            "direct_url": info.get("url") or info.get("webpage_url"),
+            "direct_url": direct_url or info.get("webpage_url"),
             "filesize_approx": info.get("filesize") or info.get("filesize_approx", 0),
         }
 
@@ -209,12 +222,14 @@ def download_media_sync(url: str, output_template: str, mode: str = "video") -> 
         "buffersize": 1024 * 1024,
         "retries": 10,
         "socket_timeout": 30,
-        "http_headers": {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-            "Accept": "*/*",
-            "Accept-Language": "en-US,en;q=0.9",
+        "extractor_args": {
+            "youtube": {
+                "player_client": ["web_embedded", "mweb", "android", "ios"],
+            }
         },
     }
+    if os.path.exists("cookies.txt"):
+        ydl_opts["cookiefile"] = "cookies.txt"
 
     if mode == "audio":
         # Best audio converted to MP3 at 192kbps
@@ -228,6 +243,7 @@ def download_media_sync(url: str, output_template: str, mode: str = "video") -> 
         # High speed video format selection
         ydl_opts["format"] = (
             "bestvideo[ext=mp4]+bestaudio[ext=m4a]/"
+            "bestvideo+bestaudio/"
             "best[ext=mp4]/"
             "best"
         )
