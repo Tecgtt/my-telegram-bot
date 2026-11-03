@@ -177,7 +177,7 @@ def extract_media_info(url: str) -> dict:
         "noplaylist": True,
         "extractor_args": {
             "youtube": {
-                "player_client": ["web_embedded", "mweb", "android", "ios"],
+                "player_client": ["android"],
             }
         },
     }
@@ -224,7 +224,7 @@ def download_media_sync(url: str, output_template: str, mode: str = "video") -> 
         "socket_timeout": 30,
         "extractor_args": {
             "youtube": {
-                "player_client": ["web_embedded", "mweb", "android", "ios"],
+                "player_client": ["android"],
             }
         },
     }
@@ -233,7 +233,7 @@ def download_media_sync(url: str, output_template: str, mode: str = "video") -> 
 
     if mode == "audio":
         # Best audio converted to MP3 at 192kbps
-        ydl_opts["format"] = "bestaudio[ext=m4a]/bestaudio/best"
+        ydl_opts["format"] = "bestaudio[ext=m4a]/bestaudio/ba/18/best"
         ydl_opts["postprocessors"] = [{
             "key": "FFmpegExtractAudio",
             "preferredcodec": "mp3",
@@ -244,6 +244,7 @@ def download_media_sync(url: str, output_template: str, mode: str = "video") -> 
         ydl_opts["format"] = (
             "bestvideo[ext=mp4]+bestaudio[ext=m4a]/"
             "bestvideo+bestaudio/"
+            "18/"
             "best[ext=mp4]/"
             "best"
         )
@@ -320,18 +321,29 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if user_is_admin:
         welcome_text = (
-            "👑 **Welcome Admin (@yqios)!**\n\n"
-            "Download videos & audio from **YouTube**, **Instagram**, and **Facebook**.\n"
-            "Use the button below to open your **Admin Dashboard**.\n\n"
-            "⚡ *Paste any video link to start downloading!*"
+            "👑 **Welcome Back, Boss (@yqios)!** ✨\n"
+            "━━━━━━━━━━━━━━━━━━━━━━\n"
+            "🟢 **System Status:** Bot Live 24/7\n\n"
+            "📥 **Supported Platforms:**\n"
+            "• 🔴 **YouTube** (Videos & Shorts)\n"
+            "• 📸 **Instagram** (Reels & Posts)\n"
+            "• 🔵 **Facebook** (Videos & Watch)\n"
+            "• 🐦 **Twitter (X)** (Videos)\n\n"
+            "⚡ *Paste any link to download, or manage via Dashboard below!*"
         )
     else:
         welcome_text = (
-            "👋 **Welcome to All-in-One Video Downloader Bot!**\n\n"
-            "Download high quality videos & MP3 audio from **YouTube**, **Instagram**, **Facebook**, and **Twitter (X)**.\n\n"
-            "⚡ **How to use:**\n"
-            "Simply send or paste any video link here!\n"
-            "*(बस किसी भी वीडियो का लिंक यहाँ भेजें)*"
+            "✨ **Universal Media Downloader** 🚀\n"
+            "━━━━━━━━━━━━━━━━━━━━━━\n"
+            "⚡ **Fast • High-Quality • 100% Free**\n\n"
+            "📥 **Supported Platforms:**\n"
+            "• 🔴 **YouTube** (Videos & Shorts)\n"
+            "• 📸 **Instagram** (Reels & Posts)\n"
+            "• 🔵 **Facebook** (Videos & Watch)\n"
+            "• 🐦 **Twitter (X)** (Videos & Clips)\n\n"
+            "🎬 **Video (MP4)** & 🎵 **Audio (MP3)** Supported!\n\n"
+            "👉 **Send or paste any video link to start!**\n"
+            "*(बस किसी भी वीडियो का लिंक यहाँ भेजें और तुरंत डाउनलोड करें)*"
         )
 
     # Base buttons list (Zero contact text in message body)
@@ -576,7 +588,8 @@ async def handle_incoming_link(update: Update, context: ContextTypes.DEFAULT_TYP
 
         caption_text = (
             f"🎬 **{title}**\n"
-            f"⏱️ **Duration:** {duration_str} | 👤 **Source:** {uploader}\n\n"
+            "━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"⏱️ **Duration:** `{duration_str}`  •  👤 **Uploader:** `{uploader}`\n\n"
             "👇 **Choose download format:**"
         )
 
