@@ -12,4 +12,4 @@ services:
       - key: ADMIN_USERNAME
         value: yqios
       - key: PORT
-        value: 8080
+        value: 10000

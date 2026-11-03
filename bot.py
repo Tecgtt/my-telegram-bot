@@ -50,7 +50,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Constants
-BOT_TOKEN = os.getenv("BOT_TOKEN")
+BOT_TOKEN = os.getenv("BOT_TOKEN") or "9136752920:AAGSZ7IhtJbeNNBfFdQGU-4aI6BDK2tgq9E"
 DOWNLOADS_DIR = Path(__file__).parent / "downloads"
 DOWNLOADS_DIR.mkdir(exist_ok=True)
 
@@ -67,7 +67,7 @@ URL_REGEX = re.compile(r"https?://(?:www\.)?[-a-zA-Z0-9@:%._\+~#=]{1,256}\.[a-zA
 TELEGRAM_MAX_UPLOAD_BYTES = 50 * 1024 * 1024
 
 # Owner & Admin Config
-ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "yqios").lower().lstrip("@")
+ADMIN_USERNAME = (os.getenv("ADMIN_USERNAME") or "yqios").lower().lstrip("@")
 ADMIN_ID = os.getenv("ADMIN_ID")  # Optional numeric ID in .env
 
 # Contact Info
@@ -90,16 +90,12 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
 
 
 def start_health_server():
-    """Runs HTTP server if PORT environment variable is present (Cloud hosting)."""
-    port_str = os.getenv("PORT")
-    if not port_str and os.getenv("SPACE_ID"):
-        port_str = "7860"
-    if not port_str:
-        return
+    """Runs HTTP server for Render/Railway/Koyeb 24/7 web service health checks."""
+    port_str = os.getenv("PORT", "10000")
     try:
         port = int(port_str)
         server = HTTPServer(("0.0.0.0", port), HealthCheckHandler)
-        logger.info(f"Health-check server running on port {port} for 24/7 Cloud Hosting")
+        logger.info(f"Health-check server running on 0.0.0.0:{port} for Cloud 24/7 Hosting")
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
     except Exception as e:
