@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: telegram-video-bot
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: python3 bot.py
+    plan: free
+    autoDeploy: true
+    envVars:
+      - key: BOT_TOKEN
+        value: 9136752920:AAGSZ7IhtJbeNNBfFdQGU-4aI6BDK2tgq9E
+      - key: ADMIN_USERNAME
+        value: yqios
+      - key: PORT
+        value: 8080
