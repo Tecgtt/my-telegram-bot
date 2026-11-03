@@ -49,7 +49,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Constants
+# Constants & Fallback Token
 BOT_TOKEN = os.getenv("BOT_TOKEN") or "9136752920:AAGSZ7IhtJbeNNBfFdQGU-4aI6BDK2tgq9E"
 DOWNLOADS_DIR = Path(__file__).parent / "downloads"
 DOWNLOADS_DIR.mkdir(exist_ok=True)
@@ -116,7 +116,6 @@ def is_admin(user) -> bool:
         clean_user = user.username.lower().lstrip("@")
         clean_admin = ADMIN_USERNAME.lower().lstrip("@")
         if clean_user == clean_admin:
-            # Store numeric ID in database for future fast check
             database.set_setting("admin_id", str(user.id))
             return True
 
@@ -129,11 +128,11 @@ def is_admin(user) -> bool:
 
 
 def get_contact_buttons() -> list:
-    """Returns a list of inline buttons for contact."""
+    """Returns clean inline buttons for contact support."""
     return [
         [
-            InlineKeyboardButton("💬 Telegram (@yqios)", url=SUPPORT_TELEGRAM_URL),
-            InlineKeyboardButton("📱 WhatsApp (+917015346487)", url=SUPPORT_WHATSAPP_URL),
+            InlineKeyboardButton("💬 Telegram Support", url=SUPPORT_TELEGRAM_URL),
+            InlineKeyboardButton("📱 WhatsApp Support", url=SUPPORT_WHATSAPP_URL),
         ]
     ]
 
@@ -141,19 +140,19 @@ def get_contact_buttons() -> list:
 def get_admin_dashboard_markup() -> InlineKeyboardMarkup:
     """Returns inline keyboard for the Admin Panel."""
     notify_val = database.get_setting("notify_admin", "1")
-    notify_text = "🔔 लाइव अलर्ट: ON ✅" if notify_val == "1" else "🔕 लाइव अलर्ट: OFF ❌"
+    notify_text = "🔔 Live Alerts: ON ✅" if notify_val == "1" else "🔕 Live Alerts: OFF ❌"
 
     keyboard = [
         [
-            InlineKeyboardButton("🔄 रिफ्रेश आँकड़े", callback_data="admin:refresh"),
+            InlineKeyboardButton("🔄 Refresh Stats", callback_data="admin:refresh"),
             InlineKeyboardButton(notify_text, callback_data="admin:toggle_notify"),
         ],
         [
-            InlineKeyboardButton("👥 यूज़र्स लिस्ट", callback_data="admin:users"),
-            InlineKeyboardButton("📜 डाउनलोड हिस्ट्री", callback_data="admin:history"),
+            InlineKeyboardButton("👥 Users List", callback_data="admin:users"),
+            InlineKeyboardButton("📜 Download History", callback_data="admin:history"),
         ],
         [
-            InlineKeyboardButton("📥 डेटाबेस फ़ाइल (.db)", callback_data="admin:backup"),
+            InlineKeyboardButton("📥 Download Database (.db)", callback_data="admin:backup"),
         ]
     ]
     return InlineKeyboardMarkup(keyboard)
@@ -177,7 +176,8 @@ def extract_media_info(url: str) -> dict:
         "no_warnings": True,
         "noplaylist": True,
         "http_headers": {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+            "Accept": "*/*",
         },
     }
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -189,13 +189,14 @@ def extract_media_info(url: str) -> dict:
             "duration": info.get("duration", 0),
             "uploader": info.get("uploader", "Unknown"),
             "direct_url": info.get("url") or info.get("webpage_url"),
+            "filesize_approx": info.get("filesize") or info.get("filesize_approx", 0),
         }
 
 
 def download_media_sync(url: str, output_template: str, mode: str = "video") -> dict:
     """
     Downloads Video (MP4) or Audio (MP3) synchronously.
-    Uses FFmpeg for conversions.
+    Optimized for high-speed multi-fragment parallel downloading.
     """
     ydl_opts = {
         "outtmpl": output_template,
@@ -203,25 +204,31 @@ def download_media_sync(url: str, output_template: str, mode: str = "video") -> 
         "quiet": True,
         "no_warnings": True,
         "ffmpeg_location": FFMPEG_PATH,
+        # High speed parallel downloading optimizations
+        "concurrent_fragment_downloads": 8,
+        "buffersize": 1024 * 1024,
+        "retries": 10,
+        "socket_timeout": 30,
         "http_headers": {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+            "Accept": "*/*",
+            "Accept-Language": "en-US,en;q=0.9",
         },
     }
 
     if mode == "audio":
-        ydl_opts["format"] = "bestaudio/best"
+        # Best audio converted to MP3 at 192kbps
+        ydl_opts["format"] = "bestaudio[ext=m4a]/bestaudio/best"
         ydl_opts["postprocessors"] = [{
             "key": "FFmpegExtractAudio",
             "preferredcodec": "mp3",
             "preferredquality": "192",
         }]
     else:
+        # High speed video format selection
         ydl_opts["format"] = (
-            "best[filesize<48M][ext=mp4]/"
-            "bestvideo[filesize<40M][ext=mp4]+bestaudio[filesize<8M]/"
-            "best[height<=720][filesize<48M]/"
-            "best[height<=480]/"
-            "best[height<=360]/"
+            "bestvideo[ext=mp4]+bestaudio[ext=m4a]/"
+            "best[ext=mp4]/"
             "best"
         )
 
@@ -262,17 +269,17 @@ async def notify_admin_download(context: ContextTypes.DEFAULT_TYPE, user, title:
 
         format_label = "🎬 Video (MP4)" if mode == "video" else "🎵 Audio (MP3)"
         user_name = f"{user.first_name or ''} {user.last_name or ''}".strip() or "Anonymous"
-        username_str = f"@{user.username}" if user.username else "उपलब्ध नहीं"
+        username_str = f"@{user.username}" if user.username else "N/A"
 
         alert_text = (
-            "🔔 **नया डाउनलोड अलर्ट!**\n\n"
-            f"👤 **यूज़र:** {user_name}\n"
+            "🔔 **New Download Alert!**\n\n"
+            f"👤 **User:** {user_name}\n"
             f"🆔 **User ID:** `{user.id}`\n"
-            f"🏷️ **यूज़रनेम:** {username_str}\n"
-            f"📁 **फ़ॉर्मेट:** {format_label}\n"
-            f"📦 **साइज़:** {size_mb:.1f} MB\n"
-            f"🎬 **टाइटल:** {title}\n"
-            f"🔗 **लिंक:** {url[:100]}"
+            f"🏷️ **Username:** {username_str}\n"
+            f"📁 **Format:** {format_label}\n"
+            f"📦 **Size:** {size_mb:.1f} MB\n"
+            f"🎬 **Title:** {title}\n"
+            f"🔗 **Link:** {url[:100]}"
         )
 
         await context.bot.send_message(
@@ -296,38 +303,27 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_is_admin = is_admin(user)
 
     if user_is_admin:
-        welcome_header = (
-            "👑 **नमस्ते एडमिन (@yqios)! आपका स्वागत है।**\n"
-            "आप बॉट के मुख्य व्यवस्थापक (Owner) हैं। आप नीचे दिए गए बटन पर क्लिक करके या `/admin` कमांड भेजकर पूरा **कंट्रोल डैशबोर्ड** देख सकते हैं।\n\n"
-            "━━━━━━━━━━━━━━━━━━━━\n"
+        welcome_text = (
+            "👑 **Welcome Admin (@yqios)!**\n\n"
+            "Download videos & audio from **YouTube**, **Instagram**, and **Facebook**.\n"
+            "Use the button below to open your **Admin Dashboard**.\n\n"
+            "⚡ *Paste any video link to start downloading!*"
         )
     else:
-        welcome_header = ""
+        welcome_text = (
+            "👋 **Welcome to All-in-One Video Downloader Bot!**\n\n"
+            "Download high quality videos & MP3 audio from **YouTube**, **Instagram**, **Facebook**, and **Twitter (X)**.\n\n"
+            "⚡ **How to use:**\n"
+            "Simply send or paste any video link here!\n"
+            "*(बस किसी भी वीडियो का लिंक यहाँ भेजें)*"
+        )
 
-    welcome_text = (
-        f"{welcome_header}"
-        "👋 **नमस्ते! All-in-One Video & MP3 Downloader Bot में आपका स्वागत है!**\n\n"
-        "आप मुझे निम्न प्लेटफ़ॉर्म के लिंक भेज सकते हैं:\n"
-        "▶️ **YouTube** (Videos, Shorts & Music)\n"
-        "📸 **Instagram** (Reels & Videos)\n"
-        "👥 **Facebook** (Reels & Watch Videos)\n"
-        "🐦 **Twitter / X**\n\n"
-        "📌 **इस्तेमाल कैसे करें:**\n"
-        "1. किसी भी वीडियो का लिंक कॉपी करके यहाँ भेजें।\n"
-        "2. फिर चुनें कि आपको **🎬 Video (MP4)** चाहिए या **🎵 Audio (MP3)**!\n\n"
-        "📦 **50MB+ वीडियो:** बड़ी वीडियो के लिए 1-क्लिक डायरेक्ट डाउनलोड लिंक भी उपलब्ध रहता है।\n\n"
-        "━━━━━━━━━━━━━━━━━━━━\n"
-        "📞 **संपर्क एवं सहायता (Contact & Support):**\n"
-        f"💬 **Telegram:** [@{SUPPORT_TELEGRAM_USERNAME}]({SUPPORT_TELEGRAM_URL})\n"
-        f"📱 **WhatsApp:** [{SUPPORT_WHATSAPP_NUMBER}]({SUPPORT_WHATSAPP_URL})"
-    )
-
-    # Base buttons list
+    # Base buttons list (Zero contact text in message body)
     keyboard = get_contact_buttons()
 
-    # If the user is admin, insert the Dashboard button at the very top!
+    # If the user is admin, insert the Dashboard button at the very top
     if user_is_admin:
-        keyboard.insert(0, [InlineKeyboardButton("👑 एडमिन कंट्रोल डैशबोर्ड", callback_data="admin:refresh")])
+        keyboard.insert(0, [InlineKeyboardButton("👑 Admin Dashboard", callback_data="admin:refresh")])
 
     await update.message.reply_text(
         welcome_text,
@@ -341,7 +337,7 @@ async def admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handles /admin command for bot owner."""
     user = update.effective_user
     if not is_admin(user):
-        await update.message.reply_text("⛔ **यह कमांड केवल बॉट एडमिन के लिए आरक्षित है।**")
+        await update.message.reply_text("⛔ **This command is reserved for Bot Admin only.**")
         return
 
     # Cache admin id
@@ -349,22 +345,22 @@ async def admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     stats = database.get_stats()
     notify_val = database.get_setting("notify_admin", "1")
-    notify_status = "चालू (ON) ✅" if notify_val == "1" else "बंद (OFF) ❌"
+    notify_status = "ON ✅" if notify_val == "1" else "OFF ❌"
 
     text = (
-        "👑 **एडमिन कंट्रोल डैशबोर्ड (Admin Panel)**\n\n"
-        f"📊 **समग्र आँकड़े (Overall Stats):**\n"
-        f"• 👥 **कुल यूज़र्स:** `{stats['total_users']}`\n"
-        f"• ⬇️ **कुल डाउनलोड्स:** `{stats['total_downloads']}`\n"
-        f"   ├ 🎬 वीडियो (MP4): `{stats['video_downloads']}`\n"
-        f"   └ 🎵 ऑडियो (MP3): `{stats['audio_downloads']}`\n"
-        f"• 📦 **कुल डेटा ट्रांसफर:** `{stats['total_mb']:.1f} MB`\n\n"
-        f"📅 **आज की गतिविधि (Today):**\n"
-        f"• ⬇️ आज के डाउनलोड्स: `{stats['today_downloads']}`\n"
-        f"• 👥 आज के नए यूज़र्स: `{stats['today_new_users']}`\n\n"
-        f"🔔 **रियल-टाइम डाउनलोड अलर्ट:** {notify_status}\n"
+        "👑 **Admin Control Dashboard**\n\n"
+        f"📊 **Overall Stats:**\n"
+        f"• 👥 **Total Users:** `{stats['total_users']}`\n"
+        f"• ⬇️ **Total Downloads:** `{stats['total_downloads']}`\n"
+        f"   ├ 🎬 Video (MP4): `{stats['video_downloads']}`\n"
+        f"   └ 🎵 Audio (MP3): `{stats['audio_downloads']}`\n"
+        f"• 📦 **Total Bandwidth:** `{stats['total_mb']:.1f} MB`\n\n"
+        f"📅 **Today's Activity:**\n"
+        f"• ⬇️ Downloads Today: `{stats['today_downloads']}`\n"
+        f"• 👥 New Users Today: `{stats['today_new_users']}`\n\n"
+        f"🔔 **Live Download Alerts:** `{notify_status}`\n"
         "━━━━━━━━━━━━━━━━━━━━\n"
-        "👇 **नीचे दिए गए बटन्स से विवरण देखें या सेटिंग्स बदलें:**"
+        "👇 **Manage using the buttons below:**"
     )
 
     await update.message.reply_text(
@@ -380,7 +376,7 @@ async def handle_admin_callback(update: Update, context: ContextTypes.DEFAULT_TY
     user = update.effective_user
 
     if not is_admin(user):
-        await query.answer("⛔ अनधिकृत (Unauthorized)", show_alert=True)
+        await query.answer("⛔ Unauthorized", show_alert=True)
         return
 
     await query.answer()
@@ -389,22 +385,22 @@ async def handle_admin_callback(update: Update, context: ContextTypes.DEFAULT_TY
     if data == "admin:refresh":
         stats = database.get_stats()
         notify_val = database.get_setting("notify_admin", "1")
-        notify_status = "चालू (ON) ✅" if notify_val == "1" else "बंद (OFF) ❌"
+        notify_status = "ON ✅" if notify_val == "1" else "OFF ❌"
 
         text = (
-            "👑 **एडमिन कंट्रोल डैशबोर्ड (Admin Panel)**\n\n"
-            f"📊 **समग्र आँकड़े (Overall Stats):**\n"
-            f"• 👥 **कुल यूज़र्स:** `{stats['total_users']}`\n"
-            f"• ⬇️ **कुल डाउनलोड्स:** `{stats['total_downloads']}`\n"
-            f"   ├ 🎬 वीडियो (MP4): `{stats['video_downloads']}`\n"
-            f"   └ 🎵 ऑडियो (MP3): `{stats['audio_downloads']}`\n"
-            f"• 📦 **कुल डेटा ट्रांसफर:** `{stats['total_mb']:.1f} MB`\n\n"
-            f"📅 **आज की गतिविधि (Today):**\n"
-            f"• ⬇️ आज के डाउनलोड्स: `{stats['today_downloads']}`\n"
-            f"• 👥 आज के नए यूज़र्स: `{stats['today_new_users']}`\n\n"
-            f"🔔 **रियल-टाइम डाउनलोड अलर्ट:** {notify_status}\n"
+            "👑 **Admin Control Dashboard**\n\n"
+            f"📊 **Overall Stats:**\n"
+            f"• 👥 **Total Users:** `{stats['total_users']}`\n"
+            f"• ⬇️ **Total Downloads:** `{stats['total_downloads']}`\n"
+            f"   ├ 🎬 Video (MP4): `{stats['video_downloads']}`\n"
+            f"   └ 🎵 Audio (MP3): `{stats['audio_downloads']}`\n"
+            f"• 📦 **Total Bandwidth:** `{stats['total_mb']:.1f} MB`\n\n"
+            f"📅 **Today's Activity:**\n"
+            f"• ⬇️ Downloads Today: `{stats['today_downloads']}`\n"
+            f"• 👥 New Users Today: `{stats['today_new_users']}`\n\n"
+            f"🔔 **Live Download Alerts:** `{notify_status}`\n"
             "━━━━━━━━━━━━━━━━━━━━\n"
-            "👇 **नीचे दिए गए बटन्स से विवरण देखें या सेटिंग्स बदलें:**"
+            "👇 **Manage using the buttons below:**"
         )
         try:
             await query.edit_message_text(
@@ -419,25 +415,24 @@ async def handle_admin_callback(update: Update, context: ContextTypes.DEFAULT_TY
         current = database.get_setting("notify_admin", "1")
         new_val = "0" if current == "1" else "1"
         database.set_setting("notify_admin", new_val)
-        status_str = "चालू (ON)" if new_val == "1" else "बंद (OFF)"
-        await query.answer(f"🔔 रियल-टाइम अलर्ट: {status_str}", show_alert=True)
+        status_str = "ON ✅" if new_val == "1" else "OFF ❌"
+        await query.answer(f"Live Alerts: {status_str}", show_alert=True)
 
         stats = database.get_stats()
-        notify_status = "चालू (ON) ✅" if new_val == "1" else "बंद (OFF) ❌"
         text = (
-            "👑 **एडमिन कंट्रोल डैशबोर्ड (Admin Panel)**\n\n"
-            f"📊 **समग्र आँकड़े (Overall Stats):**\n"
-            f"• 👥 **कुल यूज़र्स:** `{stats['total_users']}`\n"
-            f"• ⬇️ **कुल डाउनलोड्स:** `{stats['total_downloads']}`\n"
-            f"   ├ 🎬 वीडियो (MP4): `{stats['video_downloads']}`\n"
-            f"   └ 🎵 ऑडियो (MP3): `{stats['audio_downloads']}`\n"
-            f"• 📦 **कुल डेटा ट्रांसफर:** `{stats['total_mb']:.1f} MB`\n\n"
-            f"📅 **आज की गतिविधि (Today):**\n"
-            f"• ⬇️ आज के डाउनलोड्स: `{stats['today_downloads']}`\n"
-            f"• 👥 आज के नए यूज़र्स: `{stats['today_new_users']}`\n\n"
-            f"🔔 **रियल-टाइम डाउनलोड अलर्ट:** {notify_status}\n"
+            "👑 **Admin Control Dashboard**\n\n"
+            f"📊 **Overall Stats:**\n"
+            f"• 👥 **Total Users:** `{stats['total_users']}`\n"
+            f"• ⬇️ **Total Downloads:** `{stats['total_downloads']}`\n"
+            f"   ├ 🎬 Video (MP4): `{stats['video_downloads']}`\n"
+            f"   └ 🎵 Audio (MP3): `{stats['audio_downloads']}`\n"
+            f"• 📦 **Total Bandwidth:** `{stats['total_mb']:.1f} MB`\n\n"
+            f"📅 **Today's Activity:**\n"
+            f"• ⬇️ Downloads Today: `{stats['today_downloads']}`\n"
+            f"• 👥 New Users Today: `{stats['today_new_users']}`\n\n"
+            f"🔔 **Live Download Alerts:** `{status_str}`\n"
             "━━━━━━━━━━━━━━━━━━━━\n"
-            "👇 **नीचे दिए गए बटन्स से विवरण देखें या सेटिंग्स बदलें:**"
+            "👇 **Manage using the buttons below:**"
         )
         await query.edit_message_text(
             text,
@@ -448,23 +443,23 @@ async def handle_admin_callback(update: Update, context: ContextTypes.DEFAULT_TY
     elif data == "admin:users":
         users = database.get_recent_users(limit=10)
         if not users:
-            text = "👥 **हालिया यूज़र्स:** अभी तक कोई यूज़र रिकॉर्ड नहीं है।"
+            text = "👥 **Recent Users:** No user records found yet."
         else:
-            text = "👥 **हालिया सक्रिय यूज़र्स (Recent Active Users):**\n\n"
+            text = "👥 **Recent Active Users:**\n\n"
             for idx, u in enumerate(users, 1):
                 name = u["first_name"] or "User"
                 username = f"@{u['username']}" if u["username"] else "N/A"
-                text += f"{idx}. **{name}** ({username})\n   • ID: `{u['user_id']}` | डाउनलोड्स: `{u['download_count']}`\n"
+                text += f"{idx}. **{name}** ({username})\n   • ID: `{u['user_id']}` | Downloads: `{u['download_count']}`\n"
 
-        back_markup = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 वापस डैशबोर्ड", callback_data="admin:refresh")]])
+        back_markup = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back to Dashboard", callback_data="admin:refresh")]])
         await query.edit_message_text(text, parse_mode="Markdown", reply_markup=back_markup)
 
     elif data == "admin:history":
         downloads = database.get_recent_downloads(limit=10)
         if not downloads:
-            text = "📜 **डाउनलोड हिस्ट्री:** अभी तक कोई डाउनलोड नहीं हुआ है।"
+            text = "📜 **Download History:** No downloads recorded yet."
         else:
-            text = "📜 **हालिया डाउनलोड रिकॉर्ड्स (Recent Downloads):**\n\n"
+            text = "📜 **Recent Downloads:**\n\n"
             for idx, d in enumerate(downloads, 1):
                 u_name = d["first_name"] or "User"
                 u_handle = f"@{d['username']}" if d["username"] else f"ID:{d['user_id']}"
@@ -476,7 +471,7 @@ async def handle_admin_callback(update: Update, context: ContextTypes.DEFAULT_TY
                     f"   🕒 `{d['created_at']}`\n\n"
                 )
 
-        back_markup = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 वापस डैशबोर्ड", callback_data="admin:refresh")]])
+        back_markup = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back to Dashboard", callback_data="admin:refresh")]])
         await query.edit_message_text(text, parse_mode="Markdown", reply_markup=back_markup)
 
     elif data == "admin:backup":
@@ -485,24 +480,25 @@ async def handle_admin_callback(update: Update, context: ContextTypes.DEFAULT_TY
             await context.bot.send_document(
                 chat_id=user.id,
                 document=open(db_file, "rb"),
-                caption="📥 **बॉट डेटाबेस बैकअप (.db)**\nइस फ़ाइल में आपके सभी यूज़र्स और डाउनलोड रिकॉर्ड्स सुरक्षित हैं।"
+                caption="📥 **Bot Database Backup (.db)**"
             )
-            await query.answer("डेटाबेस फ़ाइल भेज दी गई है!", show_alert=True)
+            await query.answer("Database file sent!", show_alert=True)
         else:
-            await query.answer("डेटाबेस फ़ाइल अभी उपलब्ध नहीं है।", show_alert=True)
+            await query.answer("Database file not found.", show_alert=True)
 
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handles the /help command."""
     help_text = (
-        "ℹ️ **मदद और अक्सर पूछे जाने वाले सवाल (Help & FAQ)**\n\n"
-        "1️⃣ **वीडियो या MP3 डाउनलोड कैसे करें?**\n"
-        "लिंक भेजें -> फिर 'Video (MP4)' या 'Audio (MP3)' बटन पर क्लिक करें।\n\n"
-        "2️⃣ **50MB से बड़ी वीडियो का क्या होगा?**\n"
-        "टेलीग्राम बॉट सीधे 50MB तक की वीडियो भेज सकता है। उससे बड़ी वीडियो के लिए बॉट आपको डायरेक्ट 1-Click डाउनलोड लिंक देता है।\n\n"
-        "3️⃣ **सपोर्ट व संपर्क:**\n"
-        f"• Telegram: [@{SUPPORT_TELEGRAM_USERNAME}]({SUPPORT_TELEGRAM_URL})\n"
-        f"• WhatsApp: [{SUPPORT_WHATSAPP_NUMBER}]({SUPPORT_WHATSAPP_URL})"
+        "ℹ️ **Help & FAQ**\n\n"
+        "1️⃣ **How to download?**\n"
+        "Send any video link ➔ Choose **Video (MP4)** or **Audio (MP3)**.\n\n"
+        "2️⃣ **Supported Platforms:**\n"
+        "YouTube (Videos & Shorts), Instagram (Reels & Posts), Facebook, and Twitter/X.\n\n"
+        "3️⃣ **Large Files (> 50MB):**\n"
+        "For files larger than 50MB, the bot provides an instant **High-Speed Direct Download** button.\n\n"
+        "4️⃣ **Support:**\n"
+        "Use the buttons below to contact support directly."
     )
     await update.message.reply_text(
         help_text,
@@ -525,13 +521,13 @@ async def handle_incoming_link(update: Update, context: ContextTypes.DEFAULT_TYP
     urls = URL_REGEX.findall(text)
     if not urls:
         await update.message.reply_text(
-            "⚠️ कृपया एक मान्य वीडियो लिंक भेजें (YouTube, Instagram, Facebook आदि)।\n"
-            f"सहायता के लिए संपर्क करें: @{SUPPORT_TELEGRAM_USERNAME}"
+            "⚠️ Please send a valid video link (YouTube, Instagram, Facebook, etc.).",
+            reply_markup=InlineKeyboardMarkup(get_contact_buttons())
         )
         return
 
     target_url = urls[0]
-    status_msg = await update.message.reply_text("🔍 वीडियो की जानकारी जांची जा रही है...")
+    status_msg = await update.message.reply_text("🔍 Fetching media details...")
 
     try:
         media_info = await asyncio.to_thread(extract_media_info, target_url)
@@ -557,16 +553,15 @@ async def handle_incoming_link(update: Update, context: ContextTypes.DEFAULT_TYP
                 InlineKeyboardButton("🎵 Audio (MP3)", callback_data=f"dl:audio:{req_id}"),
             ],
             [
-                InlineKeyboardButton("💬 Telegram (@yqios)", url=SUPPORT_TELEGRAM_URL),
-                InlineKeyboardButton("📱 WhatsApp", url=SUPPORT_WHATSAPP_URL),
+                InlineKeyboardButton("💬 Telegram Support", url=SUPPORT_TELEGRAM_URL),
+                InlineKeyboardButton("📱 WhatsApp Support", url=SUPPORT_WHATSAPP_URL),
             ]
         ]
 
         caption_text = (
-            f"🎬 **{title}**\n\n"
-            f"⏱️ **अवधि (Duration):** {duration_str}\n"
-            f"👤 **चैनल / सोर्स:** {uploader}\n\n"
-            "👇 **कृपया चुनें कि आप किस फ़ॉर्मेट में डाउनलोड करना चाहते हैं:**"
+            f"🎬 **{title}**\n"
+            f"⏱️ **Duration:** {duration_str} | 👤 **Source:** {uploader}\n\n"
+            "👇 **Choose download format:**"
         )
 
         await status_msg.edit_text(
@@ -579,8 +574,7 @@ async def handle_incoming_link(update: Update, context: ContextTypes.DEFAULT_TYP
     except Exception as e:
         logger.exception("Error extracting media info")
         await status_msg.edit_text(
-            f"❌ वीडियो की जानकारी लोड नहीं हो सकी: {str(e)[:150]}\n\n"
-            f"सहायता के लिए संपर्क करें: @{SUPPORT_TELEGRAM_USERNAME}",
+            f"❌ Unable to process link: {str(e)[:150]}\n\nPlease check if the link is public and accessible.",
             reply_markup=InlineKeyboardMarkup(get_contact_buttons())
         )
 
@@ -608,7 +602,7 @@ async def handle_download_callback(update: Update, context: ContextTypes.DEFAULT
     pending = context.bot_data.get("pending_requests", {}).get(req_id)
     if not pending:
         await query.edit_message_text(
-            "⚠️ इस लिंक का समय समाप्त हो गया है। कृपया दोबारा लिंक भेजें।",
+            "⚠️ Request expired. Please send the link again.",
             reply_markup=InlineKeyboardMarkup(get_contact_buttons())
         )
         return
@@ -620,8 +614,8 @@ async def handle_download_callback(update: Update, context: ContextTypes.DEFAULT
     direct_url = pending.get("direct_url")
 
     chat_id = update.effective_chat.id
-    mode_label = "🎬 वीडियो" if mode == "video" else "🎵 MP3 ऑडियो"
-    await query.edit_message_text(f"⏳ {mode_label} डाउनलोड और प्रोसेस हो रहा है, कृपया प्रतीक्षा करें...")
+    mode_label = "🎬 Video (MP4)" if mode == "video" else "🎵 Audio (MP3)"
+    await query.edit_message_text(f"⏳ Downloading {mode_label}... Please wait...")
 
     output_template = str(DOWNLOADS_DIR / f"{chat_id}_{req_id}_%(id)s.%(ext)s")
     downloaded_file = None
@@ -646,17 +640,16 @@ async def handle_download_callback(update: Update, context: ContextTypes.DEFAULT
             # Real-time alert to Admin
             asyncio.create_task(notify_admin_download(context, user, title, mode, size_mb, target_url))
 
-            # Check 50MB limit
+            # Check 50MB Telegram limit
             if file_size <= TELEGRAM_MAX_UPLOAD_BYTES:
-                await query.edit_message_text(f"📤 {mode_label} ({size_mb:.1f} MB) भेजा जा रहा है...")
+                await query.edit_message_text(f"📤 Uploading {mode_label} ({size_mb:.1f} MB)...")
 
                 if mode == "audio":
                     await context.bot.send_chat_action(chat_id=chat_id, action=ChatAction.UPLOAD_VOICE)
                     caption = (
                         f"🎵 **{title}**\n"
                         f"👤 Artist: {uploader}\n"
-                        f"📦 Size: {size_mb:.1f} MB\n\n"
-                        f"💬 Support: [@{SUPPORT_TELEGRAM_USERNAME}]({SUPPORT_TELEGRAM_URL}) | WhatsApp: {SUPPORT_WHATSAPP_NUMBER}"
+                        f"📦 Size: {size_mb:.1f} MB"
                     )
                     with open(downloaded_file, "rb") as audio_fp:
                         await query.message.reply_audio(
@@ -676,8 +669,7 @@ async def handle_download_callback(update: Update, context: ContextTypes.DEFAULT
                     caption = (
                         f"🎬 **{title}**\n"
                         f"👤 Source: {uploader}\n"
-                        f"📦 Size: {size_mb:.1f} MB\n\n"
-                        f"💬 Support: [@{SUPPORT_TELEGRAM_USERNAME}]({SUPPORT_TELEGRAM_URL}) | WhatsApp: {SUPPORT_WHATSAPP_NUMBER}"
+                        f"📦 Size: {size_mb:.1f} MB"
                     )
                     with open(downloaded_file, "rb") as video_fp:
                         await query.message.reply_video(
@@ -695,19 +687,19 @@ async def handle_download_callback(update: Update, context: ContextTypes.DEFAULT
                 return
 
             else:
-                # File > 50MB
+                # File > 50MB: Provide instant high-speed direct download button
                 buttons = []
                 if direct_url:
-                    buttons.append([InlineKeyboardButton("⬇️ डायरेक्ट डाउनलोड लिंक (हाई स्पीड)", url=direct_url)])
+                    buttons.append([InlineKeyboardButton(f"⚡ Fast Direct Download ({size_mb:.1f} MB)", url=direct_url)])
                 buttons.append([
-                    InlineKeyboardButton("💬 Telegram (@yqios)", url=SUPPORT_TELEGRAM_URL),
-                    InlineKeyboardButton("📱 WhatsApp", url=SUPPORT_WHATSAPP_URL)
+                    InlineKeyboardButton("💬 Telegram Support", url=SUPPORT_TELEGRAM_URL),
+                    InlineKeyboardButton("📱 WhatsApp Support", url=SUPPORT_WHATSAPP_URL)
                 ])
 
                 await query.edit_message_text(
                     f"🎬 **{title}**\n\n"
-                    f"📦 **साइज़:** {size_mb:.1f} MB (50MB से बड़ा)\n"
-                    "ℹ️ *टेलीग्राम बॉट सीधे 50MB से बड़ी फ़ाइल नहीं भेज सकता। कृपया नीचे दिए गए डायरेक्ट लिंक से इसे तुरंत डाउनलोड करें:* 👇",
+                    f"📦 **Size:** {size_mb:.1f} MB (High Quality)\n\n"
+                    "⚡ *File exceeds Telegram's 50MB upload limit. Tap below to download in Full HD at maximum speed:*",
                     parse_mode="Markdown",
                     reply_markup=InlineKeyboardMarkup(buttons),
                     disable_web_page_preview=True
@@ -718,22 +710,21 @@ async def handle_download_callback(update: Update, context: ContextTypes.DEFAULT
             # Fallback direct button
             buttons = []
             if direct_url:
-                buttons.append([InlineKeyboardButton("⬇️ डायरेक्ट डाउनलोड लिंक", url=direct_url)])
+                buttons.append([InlineKeyboardButton("⚡ Fast Direct Download", url=direct_url)])
             buttons.append([
-                InlineKeyboardButton("💬 Telegram (@yqios)", url=SUPPORT_TELEGRAM_URL),
-                InlineKeyboardButton("📱 WhatsApp", url=SUPPORT_WHATSAPP_URL)
+                InlineKeyboardButton("💬 Telegram Support", url=SUPPORT_TELEGRAM_URL),
+                InlineKeyboardButton("📱 WhatsApp Support", url=SUPPORT_WHATSAPP_URL)
             ])
             await query.edit_message_text(
                 f"🎬 **{title}**\n\n"
-                "नीचे दिए गए बटन पर क्लिक करके सीधे डाउनलोड करें:",
+                "Tap below to download directly:",
                 reply_markup=InlineKeyboardMarkup(buttons)
             )
 
     except Exception as e:
         logger.exception("Error processing download callback")
         await query.edit_message_text(
-            f"❌ डाउनलोड करने में समस्या आई: {str(e)[:150]}\n\n"
-            f"मदद के लिए संपर्क करें: @{SUPPORT_TELEGRAM_USERNAME}",
+            f"❌ Download failed: {str(e)[:150]}\n\nPlease verify the link is working.",
             reply_markup=InlineKeyboardMarkup(get_contact_buttons())
         )
 
@@ -759,7 +750,7 @@ async def global_error_handler(update: object, context: ContextTypes.DEFAULT_TYP
     if isinstance(update, Update) and update.effective_message:
         try:
             await update.effective_message.reply_text(
-                "⚠️ कुछ तकनीकी समस्या आई है। कृपया दोबारा प्रयास करें या एडमिन से संपर्क करें: @yqios"
+                "⚠️ A temporary error occurred. Please try again in a few moments."
             )
         except Exception:
             pass
@@ -767,16 +758,9 @@ async def global_error_handler(update: object, context: ContextTypes.DEFAULT_TYP
 
 def main():
     """Main entrypoint to run the Telegram bot."""
-    if not BOT_TOKEN or BOT_TOKEN == "your_bot_token_here":
-        print("\n" + "=" * 60)
-        print("❌ ERROR: BOT_TOKEN नहीं मिला!")
-        print("कृपया .env फ़ाइल में अपना टेलीग्राम बॉट टोकन दर्ज करें।")
-        print("=" * 60 + "\n")
-        sys.exit(1)
+    print("🤖 Telegram Video & Audio (MP3) Downloader Bot starting...")
 
-    print("🤖 Telegram Video & Audio (MP3) Downloader Bot शुरू हो रहा है...")
-
-    # Start Cloud 24/7 Health-check server (if PORT is set in Cloud environment)
+    # Start Cloud 24/7 Health-check server on port 10000
     start_health_server()
 
     app = ApplicationBuilder().token(BOT_TOKEN).build()
@@ -792,9 +776,8 @@ def main():
     # Global Error Handler
     app.add_error_handler(global_error_handler)
 
-    print("✅ बॉट सफलतापूर्वक चल रहा है! (पॉलिंग मोड में)")
+    print("✅ Bot is actively running! (Polling mode)")
     print(f"👑 Admin Username: @{ADMIN_USERNAME}")
-    print(f"📞 Contact Support: Telegram @{SUPPORT_TELEGRAM_USERNAME} | WhatsApp: {SUPPORT_WHATSAPP_NUMBER}")
     app.run_polling()
 
 
